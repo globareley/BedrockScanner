@@ -1,5 +1,5 @@
 #
-# created by globareley // если у вас какая то хуйня пишите TG: globareley
+# created by globareley
 #
 import logging
 import socket
