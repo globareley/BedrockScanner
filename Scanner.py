@@ -1,28 +1,26 @@
-#
-# created by globareley
-#
 import logging
 import socket
 import struct
 import time
 from datetime import datetime
 import concurrent.futures
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import asyncio
+from telegram import Update
 from telegram.ext import (
     Application, 
     CommandHandler, 
     MessageHandler, 
     filters,
-    CallbackContext,
-    CallbackQueryHandler
+    CallbackContext
 )
 
-
-TOKEN = "Your Token"
+TOKEN = "8054617871:AAE8B1MYqYVjX14eOAI-6xnusy-SMLxWet8"
 PORT_RANGE = (19130, 19630) 
 SCAN_TIMEOUT = 1.5
 MAX_WORKERS = 100  
 
+# Заблокированная группа
+BLOCKED_GROUP_ID = -1002694724583
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -30,55 +28,90 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def check_access(update: Update, context: CallbackContext) -> bool:
+    """Проверяет доступ пользователя к командам"""
+    chat = update.effective_chat
+    
+    # Блокируем указанную группу
+    if chat.id == BLOCKED_GROUP_ID:
+        logger.info(f"Блокировка запроса из группы: {BLOCKED_GROUP_ID}")
+        return False
+    
+    return True
+
 async def start(update: Update, context: CallbackContext) -> None:
     """Обработка команды /start"""
+    if not await check_access(update, context):
+        return
+    
     user = update.effective_user
     await update.message.reply_html(
         f"Привет {user.mention_html()}! 👋\n"
-        "Я - сканер Minecraft Bedrock серверов.\n"
-        "Просто отправь мне IP или домен сервера, и я проверю 500+ портов!\n\n"
-        "Примеры:\n"
-        "<code>breadix.ru</code>\n"
-        "<code>mc.example.com</code>\n"
-        "<code>192.168.1.1</code>"
+        "Я - сканер Minecraft Bedrock серверов.\n\n"
+        "🔍 <b>Доступные команды:</b>\n"
+        "/start - показать это сообщение\n"
+        "/scan <code>IP</code> - сканировать сервер\n\n"  # Изменено с /search на /scan
+        "📋 <b>Примеры использования:</b>\n"
+        "<code>/scan breadix.ru</code>\n"  # Изменено с /search на /scan
+        "<code>/scan mc.example.com</code>\n"  # Изменено с /search на /scan
+        "<code>/scan 192.168.1.1</code>"  # Изменено с /search на /scan
     )
 
-async def scan_server(update: Update, context: CallbackContext) -> None:
-    """Обработка запроса на сканирование"""
-    host = update.message.text.strip()
+async def scan_command(update: Update, context: CallbackContext) -> None:  # Переименовано с search_command на scan_command
+    """Обработка команды /scan"""  # Обновлено описание
+    if not await check_access(update, context):
+        return
     
-  
+    if not context.args:
+        await update.message.reply_text(
+            "❌ <b>Использование:</b> <code>/scan IP_адрес</code>\n\n"  # Изменено с /search на /scan
+            "📋 <b>Примеры:</b>\n"
+            "<code>/scan breadix.ru</code>\n"  # Изменено с /search на /scan
+            "<code>/scan 192.168.1.1</code>",  # Изменено с /search на /scan
+            parse_mode="HTML"
+        )
+        return
+    
+    host = ' '.join(context.args).strip()
+    
     if not is_valid_host(host):
         await update.message.reply_text("❌ Неверный формат IP/домена!")
         return
     
-   
+    await process_scan_request(update, context, host)
+
+async def process_scan_request(update: Update, context: CallbackContext, host: str) -> None:
+    """Общая функция для обработки запросов на сканирование"""
     message = await update.message.reply_text(
-        f"🔎 Сканирование активных портов сервера: {host}\n"
-        f"Проверяю {PORT_RANGE[1]-PORT_RANGE[0]+1} портов...\n"
-        "⏳ Пожалуйста, подождите..."
+        f"🔎 Сканирование активных портов сервера: <code>{host}</code>\n"
+        f"🔢 Проверяю {PORT_RANGE[1]-PORT_RANGE[0]+1} портов...\n"
+        "⏳ Пожалуйста, подождите...",
+        parse_mode="HTML"
     )
     
-
     start_time = time.time()
     active_ports = await scan_ports(host)
     scan_time = time.time() - start_time
     
- 
     server_info = None
     if active_ports:
         server_info = get_server_info(host, active_ports[0])
     
-   
     result = format_results(host, active_ports, server_info, scan_time)
     
-  
     await context.bot.edit_message_text(
         chat_id=message.chat_id,
         message_id=message.message_id,
         text=result,
         parse_mode="HTML"
     )
+
+async def ignore_all_messages(update: Update, context: CallbackContext) -> None:
+    """Игнорирует все сообщения, кроме /start и /scan"""  # Обновлено описание
+    if not await check_access(update, context):
+        return
+    # Просто ничего не делаем - сообщение игнорируется
+    return
 
 def is_valid_host(host: str) -> bool:
     """Проверка валидности хоста"""
@@ -118,7 +151,6 @@ def check_bedrock_port(host: str, port: int) -> tuple:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(SCAN_TIMEOUT)
         
-       
         timestamp = int(time.time())
         magic = b'\x00\xff\xff\x00\xfe\xfe\xfe\xfe\xfd\xfd\xfd\xfd\x12\x34\x56\x78'
         packet = b'\x01'
@@ -128,7 +160,6 @@ def check_bedrock_port(host: str, port: int) -> tuple:
         
         sock.sendto(packet, (host, port))
         data = sock.recv(1024)
-        
         
         if len(data) > 0 and data[0] == 0x1c:
             return port, True
@@ -225,13 +256,16 @@ def main() -> None:
     """Запуск бота"""
     application = Application.builder().token(TOKEN).build()
     
-    
+    # Добавляем обработчики для разрешенных команд
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, scan_server))
+    application.add_handler(CommandHandler("scan", scan_command))  # Изменено с "search" на "scan"
     
+    # Обработчик для ВСЕХ остальных сообщений - игнорирует их
+    # Должен быть добавлен ПОСЛЕДНИМ
+    application.add_handler(MessageHandler(filters.ALL, ignore_all_messages))
     
+    # Запуск бота
     application.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
