@@ -14,7 +14,7 @@ from telegram.ext import (
     CallbackContext
 )
 
-TOKEN = "8054617871:AAE8B1MYqYVjX14eOAI-6xnusy-SMLxWet8"
+TOKEN = "token"
 PORT_RANGE = (19130, 19630) 
 SCAN_TIMEOUT = 1.5
 MAX_WORKERS = 100  
@@ -268,4 +268,5 @@ def main() -> None:
     application.run_polling()
 
 if __name__ == "__main__":
+
     asyncio.run(main())
